@@ -7,10 +7,7 @@
 
 #set page(paper: "a4", margin: (x: 1.8cm, y: 1.6cm))
 
-// NOTE : author: none pour l'instant — on ne sait pas encore si cv.with()
-// exige des champs précis dans "author" (ex: github, linkedin...). On teste
-// d'abord sans, et on ajustera selon l'erreur éventuelle au premier compile.
-#show: cv-setup.with(author: none)
+#show: cv-setup.with(author: basics)
 
 #cv-header(basics)
 

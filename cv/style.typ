@@ -99,6 +99,7 @@
     institution: edu.institution,
     location: edu.location,
     date: edu.period,
+    [],
   )
   v(0.3em)
 }
