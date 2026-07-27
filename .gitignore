@@ -1,0 +1,11 @@
+# Claude Code : versionner la config partagée, ignorer le reste
+.claude/*
+!.claude/settings.json
+!.claude/rules/
+!.claude/skills/
+!.claude/agents/
+
+# état local, jamais partagé
+.claude/settings.local.json
+.claude/worktrees/
+.claude/agent-memory-local/
