@@ -1,0 +1,14 @@
+# Réglages globaux
+config:
+  output_dir: "music"
+  max_workers: 4
+  #cookies_file: "www.youtube.com_cookies.txt"
+
+# Liste de tes playlists
+playlists:
+  celian:
+    url: "https://music.youtube.com/playlist?list=PLlpXvekke7JjB7bP7b4euS4hhnJIA8id1&si=6MxHsrfQSD2bjQkM"
+  rosaline_csv:
+    url: "rosaline.csv"
+  vero:
+    url: "https://music.youtube.com/playlist?list=PLlpXvekke7JgnGQvg4EcQ5TcZ9_tr7pz2&si=J7YMQgTXGhanSebB"

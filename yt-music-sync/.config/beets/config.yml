@@ -1,0 +1,13 @@
+directory: ~/music
+library: ~/music/musiclibrary.db
+import:
+    move: yes
+    write: yes
+    autotag: yes
+item_fields:
+    # Petite astuce pour nettoyer les underscores dans les noms avant traitement
+    clean_name: |
+        import re
+        return re.sub(r'[_~]', ' ', title)
+paths:
+    default: %artist%/%title%

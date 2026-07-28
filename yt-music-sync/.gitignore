@@ -1,0 +1,16 @@
+# Musique et dossiers de sortie
+music/
+*.mp3
+*.m3u
+*.m4a
+*.webm
+
+# Données sensibles et temporaires
+*youtube*_cookies.txt*
+__pycache__/
+.venv-*/
+.venv/
+.env
+
+# Données de synchronisation (optionnel : garde-les si tu veux ton historique sur GitHub)
+# data/
