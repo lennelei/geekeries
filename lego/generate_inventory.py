@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate a multi-column printable HTML inventory from a BrickLink XML wanted list."""
 
+import csv
 import xml.etree.ElementTree as ET
 import html as html_mod
 import os, sys, time, urllib.request, urllib.error
@@ -17,158 +18,55 @@ PROC_DIR       = "cache/processed"   # white-background-removed copies
 NUM_COLS       = 3   # 3 or 4 columns of pieces per row on A4
 
 # ── Ordre d'impression des couleurs ────────────────────────────────────────────
-# Listez les IDs de couleur dans l'ordre souhaité.
+# Listez les IDs de couleur BrickLink (ceux du XML) dans l'ordre souhaité.
 # "_" force un saut de page AVANT le groupe suivant.
 # Les couleurs absentes de cette liste sont ajoutées à la fin (ordre numérique).
 COLOR_ORDER = [
     "1",    # White
     "90",   # Light Nougat
-    "3",    # Yellow
-    "2",    # Tan
+    "3",    # Bright Yellow
+    "2",    # Brick Yellow
     "_",
-    "12",   # Trans-Clear
+    "12",   # Transparent
     "150",  # Medium Nougat
-    "85",   # Dark Bluish Gray
+    "85",   # Dark Stone Grey
     "_",
-    "5",    # Red
+    "5",    # Bright Red
     "115",  # Warm Gold
-    "69",   # Dark Tan
+    "69",   # Sand Yellow
     "120",  # Dark Brown
     "_",
-    "86",   # Light Bluish Gray
+    "86",   # Medium Stone Grey
     "_",
     "11",   # Black
-    "4",    # Orange
+    "4",    # Bright Orange
     "_",
     "88",   # Reddish Brown
     "68",   # Dark Orange
-    "110",  # Bright Light Orange
-    "80",   # Dark Green
+    "110",  # Flame Yellowish Orange
+    "80",   # Earth Green
     "48",   # Sand Green
-    "89",   # Dark Purple
+    "89",   # Medium Lilac
     "_",
-    "7",    # Blue
-    "153",  # Dark Azure
-    "15",   # Trans-Light Blue
+    "7",    # Bright Blue
+    "153",  # Dark Azur
+    "15",   # Transparent Light Blue
     "42",   # Medium Blue
     "_",
-    "152",  # Light Aqua
+    "152",  # Aqua
     "156",  # Medium Azure
-    "104",  # Bright Pink
-    "34",   # Lime
+    "104",  # Light Purple
+    "34",   # Bright Yellowish Green
     "_",
-    "6",    # Green
+    "6",    # Dark Green
     "36",   # Bright Green
 ]
 
-# BrickLink color IDs → display names
-# Source: https://v2.bricklink.com/en-fr/catalog/color-guide + visual verification
-BRICKLINK_COLORS = {
-    # Solid
-    "1":   "White",
-    "2":   "Tan",
-    "3":   "Yellow",
-    "4":   "Orange",
-    "5":   "Red",
-    "6":   "Green",
-    "7":   "Blue",           # ancien ID BrickLink, vérifié visuellement
-    "8":   "Brown",
-    "9":   "Light Gray",
-    "10":  "Dark Gray",
-    "11":  "Black",
-    "24":  "Purple",
-    "25":  "Salmon",
-    "26":  "Light Salmon",
-    "27":  "Rust",
-    "28":  "Nougat",
-    "29":  "Earth Orange",
-    "31":  "Medium Orange",
-    "32":  "Light Orange",
-    "33":  "Light Yellow",
-    "34":  "Lime",
-    "35":  "Light Lime",
-    "36":  "Bright Green",
-    "37":  "Medium Green",
-    "38":  "Light Green",
-    "39":  "Dark Turquoise",
-    "40":  "Light Turquoise",
-    "41":  "Aqua",
-    "42":  "Medium Blue",
-    "43":  "Violet",
-    "44":  "Light Violet",
-    "47":  "Dark Pink",
-    "48":  "Sand Green",
-    "49":  "Very Light Gray",
-    "54":  "Sand Purple",
-    "55":  "Sand Blue",
-    "58":  "Sand Red",
-    "59":  "Dark Red",
-    "62":  "Light Blue",
-    "63":  "Dark Blue",
-    "66":  "Pearl Light Gray",
-    "68":  "Dark Orange",
-    "69":  "Dark Tan",
-    "71":  "Magenta",
-    "72":  "Maersk Blue",
-    "73":  "Medium Violet",
-    "76":  "Medium Lime",
-    "80":  "Dark Green",
-    "83":  "Pearl White",
-    "85":  "Dark Bluish Gray",
-    "86":  "Light Bluish Gray",
-    "87":  "Sky Blue",
-    "88":  "Reddish Brown",
-    "89":  "Dark Purple",
-    "90":  "Light Nougat",
-    "91":  "Light Brown",
-    "93":  "Light Purple",
-    "94":  "Medium Dark Pink",
-    "95":  "Flat Silver",
-    "96":  "Very Light Orange",
-    "97":  "Royal Blue",
-    "99":  "Very Light Bluish Gray",
-    "103": "Bright Light Yellow",
-    "104": "Bright Pink",
-    "105": "Bright Light Blue",
-    "109": "Dark Royal Blue",
-    "110": "Bright Light Orange",
-    "115": "Warm Gold",       # vérifié visuellement (étoile or/jaune)
-    "119": "Pearl Very Light Gray",
-    "120": "Dark Brown",
-    "150": "Medium Nougat",
-    "152": "Light Aqua",
-    "153": "Dark Azure",
-    "154": "Lavender",
-    "155": "Olive Green",
-    "156": "Medium Azure",
-    "157": "Medium Lavender",
-    "158": "Yellowish Green",
-    "161": "Dark Yellow",
-    "165": "Neon Orange",
-    "166": "Neon Green",
-    "240": "Medium Brown",
-    "241": "Medium Tan",
-    "242": "Dark Olive Green",
-    # Transparent
-    "12":  "Trans-Clear",
-    "13":  "Trans-Brown",
-    "14":  "Trans-Dark Blue",
-    "15":  "Trans-Light Blue",
-    "16":  "Trans-Neon Green",
-    "17":  "Trans-Red",
-    "18":  "Trans-Neon Orange",
-    "19":  "Trans-Yellow",
-    "20":  "Trans-Green",
-    # Chrome / Pearl
-    "21":  "Chrome Gold",
-    "22":  "Chrome Silver",
-    "52":  "Chrome Blue",
-    "57":  "Chrome Antique Brass",
-    "64":  "Chrome Green",
-    "82":  "Chrome Pink",
-    "95":  "Flat Silver",
-    "122": "Chrome Black",
-}
+# Couleurs : ID BrickLink → nom et numéro LEGO officiels + hex RGB.
+# colors.csv est généré par fetch_colors.py depuis l'API Rebrickable.
+COLORS_FILE = "colors.csv"
+with open(COLORS_FILE, newline="") as _f:
+    COLORS = {row["bl_id"]: row for row in csv.DictReader(_f)}
 
 # ── Image cache ────────────────────────────────────────────────────────────────
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -293,47 +191,19 @@ for c in sorted_colors:
 
 # ── HTML generation ────────────────────────────────────────────────────────────
 def color_label(color_id: str) -> str:
-    name = BRICKLINK_COLORS.get(color_id)
-    return f"{name} (#{color_id})" if name else f"Couleur #{color_id}"
+    c = COLORS.get(color_id)
+    if not c:
+        return f"Couleur #{color_id}"
+    if c["lego_name"]:
+        return f'{c["lego_name"]} (LEGO {c["lego_id"]} / BL {color_id})'
+    return f'{c["bl_name"]} (BL {color_id})'
 
-# Approximate hex for the color dot — verified against images
-_DOT_COLORS = {
-    # Solid
-    "1":  "#ffffff", "2":  "#e4cd9e", "3":  "#f5cd2f", "4":  "#f7722e",
-    "5":  "#c91a09", "6":  "#237841", "7":  "#1f69c0", "8":  "#583927",
-    "9":  "#9ba19d", "10": "#484d48", "11": "#111111",
-    "24": "#81007b", "25": "#f2a08c", "26": "#fcc9b3", "27": "#b52c20",
-    "28": "#d09168", "29": "#c87c1e", "31": "#f8bb3d", "32": "#f0a06b",
-    "33": "#f9f9a6", "34": "#bbd96e", "35": "#d9e4a7", "36": "#4bc93f",
-    "37": "#58ab41", "38": "#c2dab8", "39": "#008080", "40": "#aadafd",
-    "41": "#aee3d6", "42": "#6699cc", "43": "#8878a0", "44": "#c9cfe4",
-    "47": "#c870a0", "48": "#708e7c", "49": "#e6e3da",
-    "54": "#958a73", "55": "#7988a1", "58": "#b52c20", "59": "#720e0f",
-    "62": "#b4d2e3", "63": "#063b7c",
-    "66": "#d0d5d5", "68": "#a95500", "69": "#b28555",
-    "71": "#de007f", "72": "#6db5d8", "73": "#9195ca", "76": "#aace3a",
-    "80": "#184632", "83": "#f0f0f0", "85": "#575857", "86": "#afc0c4",
-    "87": "#87ceeb", "88": "#7d3a28", "89": "#3d007b", "90": "#fbcba4",
-    "91": "#c87c5c", "93": "#d3a5dc", "94": "#f39990", "95": "#898788",
-    "96": "#ffd9a0", "97": "#4c61db", "99": "#e3f0f3",
-    "103": "#f5e642", "104": "#f45197", "105": "#aadafd",
-    "109": "#1a3a6a", "110": "#f9ba61",
-    "115": "#dcbe61", "119": "#e8e8e8", "120": "#352100",
-    "150": "#c87c5c", "152": "#c0eeea", "153": "#1498d7",
-    "154": "#a5a5cb", "155": "#7c9051", "156": "#68aece",
-    "157": "#ac78ba", "158": "#d9e47c", "161": "#c8a000",
-    # Transparent (semi-transparent hex)
-    "12": "#eeeeee", "13": "#6a3000aa", "14": "#0d69abaa",
-    "15": "#aadafdaa", "16": "#37e86daa", "17": "#c91a09aa",
-    "18": "#ff800daa", "19": "#f5cd2faa", "20": "#237841aa",
-    # Chrome / Pearl
-    "21": "#dcbe61", "22": "#c0c0c0", "52": "#6699ccaa",
-    "57": "#7a6535", "64": "#2e8b2eaa", "82": "#e08080",
-    "122": "#333333",
-}
-
-def _css_color(c: str) -> str:
-    return _DOT_COLORS.get(c, "#ccc")
+def _css_color(color_id: str) -> str:
+    c = COLORS.get(color_id)
+    if not c:
+        return "#ccc"
+    # Couleurs transparentes : pastille semi-opaque
+    return f'#{c["rgb"]}' + ("aa" if c["is_trans"] == "1" else "")
 
 def piece_cell(p: dict) -> str:
     img_src = p["img"] if p["img"] else ""
