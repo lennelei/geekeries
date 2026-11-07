@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Calcule le poids total des pièces d'un set LEGO à partir d'une liste BrickLink (XML)
-en croisant avec le catalogue Parts.xml de BrickLink.
+Calcule le poids total des pièces d'un set LEGO.
+
+L'inventaire vient de l'API Rebrickable (même cache que generate_inventory.py) ;
+les poids viennent du catalogue Parts.xml de BrickLink, Rebrickable n'en fournissant pas.
 
 Usage:
-  python3 brickweight.py <set_inventory.xml> [--catalog Parts.xml] [--output out.csv]
+  python3 brickweight.py [71395-1] [--refresh] [--catalog Parts.xml] [--output out.csv]
 """
 
 import argparse
@@ -13,10 +15,13 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import rebrickable
+
 
 def load_catalog(catalog_path: Path) -> dict[str, tuple[str, float | None]]:
-    """Retourne un dict ITEMID -> (ITEMNAME, ITEMWEIGHT_g)."""
+    """Retourne un dict ITEMID -> (ITEMNAME, ITEMWEIGHT_g), alias ALTITEMIDS compris."""
     catalog: dict[str, tuple[str, float | None]] = {}
+    aliases: dict[str, tuple[str, float | None]] = {}
     tree = ET.parse(catalog_path)
     for item in tree.getroot().findall("ITEM"):
         item_id = (item.findtext("ITEMID") or "").strip()
@@ -28,69 +33,66 @@ def load_catalog(catalog_path: Path) -> dict[str, tuple[str, float | None]]:
             weight = None
         if item_id:
             catalog[item_id] = (name, weight)
-    return catalog
+            for alt in (item.findtext("ALTITEMIDS") or "").split(","):
+                if alt.strip():
+                    aliases.setdefault(alt.strip(), (name, weight))
+    # Un ID principal l'emporte toujours sur un alias
+    return {**aliases, **catalog}
 
 
-def load_inventory(inventory_path: Path) -> list[dict]:
-    """Retourne la liste des pièces avec ITEMTYPE, ITEMID, COLOR, MINQTY."""
-    tree = ET.parse(inventory_path)
-    parts = []
-    for item in tree.getroot().findall("ITEM"):
-        item_type = (item.findtext("ITEMTYPE") or "").strip()
-        if item_type != "P":
-            continue
-        parts.append({
-            "ITEMID": (item.findtext("ITEMID") or "").strip(),
-            "COLOR":  (item.findtext("COLOR") or "").strip(),
-            "MINQTY": int(item.findtext("MINQTY") or 1),
-        })
-    return parts
+def lookup(catalog: dict, part: dict) -> tuple[str, float | None]:
+    """Cherche la pièce sous chacune de ses réf. BrickLink candidates."""
+    for pid in rebrickable.bl_candidates(part):
+        name, weight = catalog.get(pid, (None, None))
+        if weight is not None:
+            return name, weight
+    return catalog.get(part["id"], (None, None))[0] or part["name"], None
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Calcule le poids d'un set LEGO depuis un XML BrickLink.")
-    parser.add_argument("inventory", help="Fichier XML de l'inventaire (ex: 71395.xml)")
+    parser = argparse.ArgumentParser(description="Calcule le poids d'un set LEGO.")
+    parser.add_argument("set", nargs="?", default="71395-1",
+                        help="numéro de set Rebrickable (défaut : 71395-1)")
+    parser.add_argument("--refresh", action="store_true",
+                        help="réinterroger l'API au lieu du cache local")
     parser.add_argument("--catalog", default="Parts.xml", help="Fichier Parts.xml (défaut: Parts.xml)")
     parser.add_argument("--output", default=None, help="Fichier CSV de sortie (défaut: stdout)")
     args = parser.parse_args()
 
-    inventory_path = Path(args.inventory)
     catalog_path = Path(args.catalog)
-
-    if not inventory_path.exists():
-        sys.exit(f"Fichier introuvable : {inventory_path}")
     if not catalog_path.exists():
         sys.exit(f"Catalogue introuvable : {catalog_path}")
 
     catalog = load_catalog(catalog_path)
-    parts = load_inventory(inventory_path)
+    set_num = rebrickable.normalize_set_num(args.set)
+    parts = rebrickable.set_items(rebrickable.load_set(set_num, args.refresh))
 
     rows = []
     total_weight = 0.0
     missing = []
 
     for part in parts:
-        item_id = part["ITEMID"]
-        qty = part["MINQTY"]
-        name, unit_weight = catalog.get(item_id, ("?", None))
+        qty = part["qty"]
+        name, unit_weight = lookup(catalog, part)
 
         if unit_weight is not None:
             line_weight = unit_weight * qty
             total_weight += line_weight
         else:
             line_weight = None
-            missing.append(item_id)
+            missing.append(part["id"])
 
         rows.append({
-            "ITEMID":       item_id,
-            "COLOR":        part["COLOR"],
-            "MINQTY":       qty,
-            "ITEMNAME":     name,
-            "WEIGHT_g":     unit_weight,
+            "ITEMID":         part["id"],
+            "COLOR":          part["color"],
+            "ELEMENT_ID":     part["elements"][0] if part["elements"] else "",
+            "MINQTY":         qty,
+            "ITEMNAME":       name,
+            "WEIGHT_g":       unit_weight,
             "TOTAL_WEIGHT_g": f"{line_weight:.4f}" if line_weight is not None else "",
         })
 
-    fieldnames = ["ITEMID", "COLOR", "MINQTY", "ITEMNAME", "WEIGHT_g", "TOTAL_WEIGHT_g"]
+    fieldnames = ["ITEMID", "COLOR", "ELEMENT_ID", "MINQTY", "ITEMNAME", "WEIGHT_g", "TOTAL_WEIGHT_g"]
 
     if args.output:
         out = open(args.output, "w", newline="", encoding="utf-8")
@@ -104,13 +106,13 @@ def main():
     if args.output:
         out.close()
 
-    total_qty = sum(p["MINQTY"] for p in parts)
-    distinct = len({p["ITEMID"] for p in parts})
+    total_qty = sum(p["qty"] for p in parts)
+    distinct = len({p["id"] for p in parts})
 
-    print(f"\n--- Résumé ---", file=sys.stderr)
+    print(f"\n--- Résumé ({set_num}) ---", file=sys.stderr)
     print(f"Références différentes : {distinct}", file=sys.stderr)
     print(f"Total pièces           : {total_qty}", file=sys.stderr)
-    print(f"Lignes dans l'XML      : {len(parts)}", file=sys.stderr)
+    print(f"Lignes d'inventaire    : {len(parts)}", file=sys.stderr)
     print(f"Poids total estimé     : {total_weight:.2f} g", file=sys.stderr)
     if missing:
         print(f"Poids inconnu ({len(missing)}) : {', '.join(sorted(set(missing)))}", file=sys.stderr)
