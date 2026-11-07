@@ -6,6 +6,7 @@ Clé API lue dans ~/.config/rebrickable/api_key (hors du repo, jamais versionné
 import csv
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -83,6 +84,17 @@ def _rb_to_bl_colors() -> dict[str, str]:
             for row in csv.DictReader(f):
                 mapping.setdefault(row["rebrickable_id"], row["bl_id"])
     return mapping
+
+
+def bl_candidates(item: dict) -> list[str]:
+    """Réf. BrickLink à essayer pour une pièce, dans l'ordre, sans doublon.
+
+    Rebrickable écrit parfois le suffixe d'impression avec des zéros de tête que
+    BrickLink n'a pas (14769pb0469 chez l'un, 14769pb469 chez l'autre) : variante ajoutée.
+    """
+    ids = [item["id"], *item.get("bl_ids", [])]
+    ids += [re.sub(r"(p[br])0+(\d)", r"\1\2", pid) for pid in ids]
+    return list(dict.fromkeys(ids))
 
 
 def set_items(set_data: dict) -> list[dict]:

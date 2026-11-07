@@ -119,18 +119,29 @@ def download(url: str, fpath: str) -> tuple[str | None, bool]:
         time.sleep(DOWNLOAD_DELAY)
 
 def cached_image(item: dict) -> tuple[str | None, bool]:
-    """Image BrickLink (fond blanc, détourée ensuite) ; à défaut, photo Rebrickable."""
+    """Image BrickLink (fond blanc, détourée ensuite) sous chaque réf. candidate ;
+    à défaut, photo Rebrickable."""
     item_id, color = item["id"], item["color"]
+    candidates = [(f"https://img.bricklink.com/ItemImage/PN/{color}/{pid}.png",
+                   os.path.join(CACHE_DIR, f"{color}_{pid}.png"))
+                  for pid in rebrickable.bl_candidates(item)]
     ext = os.path.splitext(item.get("img_url") or "")[1] or ".jpg"
     rb_path = os.path.join(CACHE_DIR, f"rb_{color}_{item_id}{ext}")
-    if os.path.exists(rb_path):   # repli déjà en cache : ne pas réessayer BrickLink
-        return rb_path, False
-    path, dl = download(f"https://img.bricklink.com/ItemImage/PN/{color}/{item_id}.png",
-                        os.path.join(CACHE_DIR, f"{color}_{item_id}.png"))
-    if path or not item.get("img_url"):
-        return path, dl
-    path, dl2 = download(item["img_url"], rb_path)
-    return path, dl or dl2
+
+    # Déjà en cache : BrickLink d'abord, puis le repli (sans réessayer BrickLink)
+    for _, path in candidates + [(None, rb_path)]:
+        if os.path.exists(path):
+            return path, False
+    downloaded = False
+    for url, path in candidates:
+        got, dl = download(url, path)
+        downloaded |= dl
+        if got:
+            return got, downloaded
+    if not item.get("img_url"):
+        return None, downloaded
+    got, dl = download(item["img_url"], rb_path)
+    return got, downloaded or dl
 
 os.makedirs(PROC_DIR, exist_ok=True)
 
@@ -179,7 +190,8 @@ total = 0
 n_total    = len(all_items)
 n_cached   = sum(
     1 for i in all_items
-    if os.path.exists(os.path.join(CACHE_DIR, f"{i['color']}_{i['id']}.png"))
+    if any(os.path.exists(os.path.join(CACHE_DIR, f"{i['color']}_{pid}.png"))
+           for pid in rebrickable.bl_candidates(i))
 )
 n_download = n_total - n_cached
 eta        = n_download * DOWNLOAD_DELAY
@@ -197,7 +209,7 @@ for idx, item in enumerate(all_items, 1):
     img, downloaded = cached_image(item)
     if downloaded:
         n_downloaded += 1
-    fname = f"{color}_{item_id}.png"
+    fname = os.path.basename(img) if img else ""
     # Seules les PNG BrickLink (fond blanc pur) sont détourées ; la photo de repli reste telle quelle
     item["img"] = (processed_image(img, fname) if img.endswith(".png") else img) if img else None
     by_color[color].append(item)

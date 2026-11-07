@@ -11,7 +11,6 @@ Usage:
 
 import argparse
 import csv
-import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -42,14 +41,8 @@ def load_catalog(catalog_path: Path) -> dict[str, tuple[str, float | None]]:
 
 
 def lookup(catalog: dict, part: dict) -> tuple[str, float | None]:
-    """Cherche la pièce par son ID BrickLink, puis par ses autres réf. BrickLink.
-
-    Rebrickable écrit parfois le suffixe d'impression avec des zéros de tête que
-    BrickLink n'a pas (14769pb0469 chez l'un, 14769pb469 chez l'autre) : variante tentée.
-    """
-    ids = [part["id"], *part["bl_ids"]]
-    ids += [re.sub(r"(p[br])0+(\d)", r"\1\2", pid) for pid in ids]
-    for pid in ids:
+    """Cherche la pièce sous chacune de ses réf. BrickLink candidates."""
+    for pid in rebrickable.bl_candidates(part):
         name, weight = catalog.get(pid, (None, None))
         if weight is not None:
             return name, weight
