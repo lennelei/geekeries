@@ -1,18 +1,33 @@
 #!/usr/bin/env python3
-"""Generate a multi-column printable HTML inventory from a BrickLink XML wanted list."""
+"""Génère une fiche inventaire HTML imprimable d'un set LEGO.
 
+L'inventaire vient de l'API Rebrickable (numéro de set, ex. 71395-1). Pièces et
+couleurs sont ramenées aux ID BrickLink, qui servent aux images et à COLOR_ORDER.
+
+Usage : python3 generate_inventory.py [--set 71395-1] [--refresh]
+"""
+
+import argparse
 import csv
-import xml.etree.ElementTree as ET
+import json
 import html as html_mod
 import os, sys, time, urllib.request, urllib.error
 from datetime import date
 from collections import defaultdict, deque
 from PIL import Image
 
+import rebrickable
+
 # ── Configuration ──────────────────────────────────────────────────────────────
-INVENTORY_FILE = "71395.xml"
-PARTS_CATALOG  = "Parts.xml"
-OUTPUT_FILE    = "71395_inventory.html"
+_args = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+_args.add_argument("--set", default="71395-1", help="numéro de set Rebrickable (défaut : 71395-1)")
+_args.add_argument("--refresh", action="store_true", help="réinterroger l'API au lieu du cache local")
+ARGS = _args.parse_args()
+
+SET_NUM        = ARGS.set if "-" in ARGS.set else f"{ARGS.set}-1"
+SET_NUM_SHORT  = SET_NUM.removesuffix("-1")
+OUTPUT_FILE    = f"{SET_NUM_SHORT}_inventory.html"
+API_CACHE      = f"cache/api/{SET_NUM}.json"
 CACHE_DIR      = "cache/images"
 PROC_DIR       = "cache/processed"   # white-background-removed copies
 NUM_COLS       = 3   # 3 or 4 columns of pieces per row on A4
@@ -83,23 +98,41 @@ _HTTP_HEADERS = {
     "Accept": "image/avif,image/webp,image/png,*/*",
 }
 
-def cached_image(item_id: str, color: str) -> tuple[str | None, bool]:
-    """Return (local_path, downloaded) — downloaded=True only when a new request was made."""
-    fname = f"{color}_{item_id}.png"
-    fpath = os.path.join(CACHE_DIR, fname)
+def download(url: str, fpath: str) -> tuple[str | None, bool]:
+    """Return (local_path, downloaded) — downloaded=True only when a new request was made.
+    Un contenu qui n'est pas une image (ex. page HTML d'erreur) n'est pas gardé."""
     if os.path.exists(fpath):
         return fpath, False
-    url = f"https://img.bricklink.com/ItemImage/PN/{color}/{item_id}.png"
     try:
         req = urllib.request.Request(url, headers=_HTTP_HEADERS)
         with urllib.request.urlopen(req, timeout=10) as resp:
-            with open(fpath, "wb") as out:
-                out.write(resp.read())
-        time.sleep(DOWNLOAD_DELAY)
+            data = resp.read()
+        with open(fpath, "wb") as out:
+            out.write(data)
+        with Image.open(fpath) as im:
+            im.verify()
         return fpath, True
     except Exception as e:
-        print(f"  ⚠  {item_id}/c{color}: {e}")
+        if os.path.exists(fpath):
+            os.remove(fpath)
+        print(f"\n  ⚠  {url} : {e}")
         return None, True   # True = a request was attempted, still sleep
+    finally:
+        time.sleep(DOWNLOAD_DELAY)
+
+def cached_image(item: dict) -> tuple[str | None, bool]:
+    """Image BrickLink (fond blanc, détourée ensuite) ; à défaut, photo Rebrickable."""
+    item_id, color = item["id"], item["color"]
+    ext = os.path.splitext(item.get("img_url") or "")[1] or ".jpg"
+    rb_path = os.path.join(CACHE_DIR, f"rb_{color}_{item_id}{ext}")
+    if os.path.exists(rb_path):   # repli déjà en cache : ne pas réessayer BrickLink
+        return rb_path, False
+    path, dl = download(f"https://img.bricklink.com/ItemImage/PN/{color}/{item_id}.png",
+                        os.path.join(CACHE_DIR, f"{color}_{item_id}.png"))
+    if path or not item.get("img_url"):
+        return path, dl
+    path, dl2 = download(item["img_url"], rb_path)
+    return path, dl or dl2
 
 os.makedirs(PROC_DIR, exist_ok=True)
 
@@ -137,25 +170,61 @@ def processed_image(src_path: str, fname: str) -> str:
     img.save(dst, "PNG")
     return dst
 
-# ── Part catalog ───────────────────────────────────────────────────────────────
-part_names: dict[str, str] = {}
-if os.path.exists(PARTS_CATALOG):
-    for item in ET.parse(PARTS_CATALOG).getroot().findall("ITEM"):
-        pid  = item.findtext("ITEMID", "").strip()
-        name = item.findtext("ITEMNAME", "").strip()
-        if pid and name:
-            part_names[pid] = html_mod.unescape(name)
+# ── Inventaire (API Rebrickable, mis en cache localement) ──────────────────────
+def load_set() -> dict:
+    """Infos du set + liste de ses pièces, depuis le cache ou l'API."""
+    if os.path.exists(API_CACHE) and not ARGS.refresh:
+        with open(API_CACHE) as f:
+            return json.load(f)
+    print(f"Interrogation de Rebrickable pour {SET_NUM}…")
+    data = {
+        "set": rebrickable.get(f"sets/{SET_NUM}/"),
+        "parts": rebrickable.get_all(f"sets/{SET_NUM}/parts/"),
+    }
+    os.makedirs(os.path.dirname(API_CACHE), exist_ok=True)
+    with open(API_CACHE, "w") as f:
+        json.dump(data, f)
+    return data
 
-# ── Parse inventory ────────────────────────────────────────────────────────────
+# Repli si la couleur n'a pas d'ID BrickLink dans la réponse : via colors.csv
+_RB_TO_BL = {}
+for _bl_id, _c in COLORS.items():
+    _RB_TO_BL.setdefault(_c["rebrickable_id"], _bl_id)
+
+def bl_color(color: dict) -> str:
+    bl = (color.get("external_ids") or {}).get("BrickLink")
+    if bl and bl.get("ext_ids"):
+        return str(bl["ext_ids"][0])
+    return _RB_TO_BL.get(str(color["id"]), f"rb{color['id']}")
+
+def bl_part(part: dict) -> str:
+    bl = part["external_ids"].get("BrickLink") or []
+    return part["part_num"] if part["part_num"] in bl or not bl else bl[0]
+
+set_data = load_set()
+SET_INFO = set_data["set"]
+
+# Regroupe par (pièce, couleur) BrickLink ; les pièces de rechange sont exclues
+items: dict[tuple[str, str], dict] = {}
+for line in set_data["parts"]:
+    if line["is_spare"]:
+        continue
+    key = (bl_part(line["part"]), bl_color(line["color"]))
+    it = items.setdefault(key, {"id": key[0], "color": key[1], "qty": 0,
+                                "name": line["part"]["name"], "elements": [],
+                                "img_url": line["part"]["part_img_url"]})
+    it["qty"] += line["quantity"]
+    if line.get("element_id") and line["element_id"] not in it["elements"]:
+        it["elements"].append(line["element_id"])
+all_items = list(items.values())
+
+# ── Images ─────────────────────────────────────────────────────────────────────
 by_color: dict[str, list] = defaultdict(list)
 total = 0
-inv_root = ET.parse(INVENTORY_FILE).getroot()
-all_items = [i for i in inv_root.findall("ITEM") if i.findtext("ITEMTYPE","").strip() == "P"]
 n_total    = len(all_items)
 n_cached   = sum(
     1 for i in all_items
-    if os.path.exists(os.path.join(CACHE_DIR,
-        f"{i.findtext('COLOR','0').strip()}_{i.findtext('ITEMID','').strip()}.png"))
+    if os.path.exists(os.path.join(CACHE_DIR, f"{i['color']}_{i['id']}.png"))
 )
 n_download = n_total - n_cached
 eta        = n_download * DOWNLOAD_DELAY
@@ -169,23 +238,21 @@ def _progress(idx: int, n: int, n_dl: int, bar_width: int = 40) -> None:
 
 n_downloaded = 0
 for idx, item in enumerate(all_items, 1):
-    item_id = item.findtext("ITEMID", "").strip()
-    color   = item.findtext("COLOR", "0").strip()
-    qty     = int(item.findtext("MINQTY", "1").strip())
-    img, downloaded = cached_image(item_id, color)
+    item_id, color = item["id"], item["color"]
+    img, downloaded = cached_image(item)
     if downloaded:
         n_downloaded += 1
     fname = f"{color}_{item_id}.png"
-    proc  = processed_image(img, fname) if img else None
-    name  = part_names.get(item_id, "")
-    by_color[color].append({"id": item_id, "color": color, "qty": qty, "img": proc, "name": name})
+    # Seules les PNG BrickLink (fond blanc pur) sont détourées ; la photo de repli reste telle quelle
+    item["img"] = (processed_image(img, fname) if img.endswith(".png") else img) if img else None
+    by_color[color].append(item)
     total += 1
     _progress(idx, n_total, n_downloaded)
 
 print()  # newline after progress bar
 
 # Sort colors by ID numerically, items within a color by part ID
-sorted_colors = sorted(by_color.keys(), key=lambda c: int(c))
+sorted_colors = sorted(by_color.keys(), key=lambda c: (not c.isdigit(), int(c) if c.isdigit() else 0, c))
 for c in sorted_colors:
     by_color[c].sort(key=lambda x: x["id"])
 
@@ -210,11 +277,14 @@ def piece_cell(p: dict) -> str:
     img_tag = (f'<img src="{img_src}" alt="{html_mod.escape(p["id"])}">'
                if img_src else '<span class="no-img">?</span>')
     name_text = html_mod.escape(p["name"]) if p["name"] else ""
+    # N° d'élément LEGO (pièce + couleur), celui qui sert à commander chez LEGO
+    elt_html = (f'<span class="pg-elt">{html_mod.escape(p["elements"][0])}</span>'
+                if p.get("elements") else "")
     return f"""    <td class="piece">
       <div class="piece-grid">
         <div class="pg-img">{img_tag}</div>
         <div class="pg-name"><span class="pg-name-text">{name_text}</span><span class="qty-badge">×{p["qty"]}</span></div>
-        <div class="pg-ref">{html_mod.escape(p["id"])}</div>
+        <div class="pg-ref" title="Réf. BrickLink / n° d'élément LEGO">{html_mod.escape(p["id"])}{elt_html}</div>
         <div class="pg-tally"></div>
       </div>
     </td>"""
@@ -334,7 +404,7 @@ html_doc = f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Inventaire LEGO 71395</title>
+<title>Inventaire LEGO {SET_NUM_SHORT}</title>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: Arial, sans-serif; font-size: 11px; background: #fff; color: #111; }}
@@ -446,6 +516,7 @@ html_doc = f"""<!DOCTYPE html>
     padding: 2px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }}
+  .pg-elt {{ display: block; font-weight: normal; color: #999; }}
 
   .pg-tally {{
     grid-area: tally;
@@ -472,7 +543,7 @@ html_doc = f"""<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1>Inventaire LEGO 71395 — Super Mario 64</h1>
+<h1>Inventaire LEGO {SET_NUM_SHORT} — {html_mod.escape(SET_INFO["name"])}</h1>
 <p class="meta">{total} références — {len(sorted_colors)} couleurs — Généré le {date.today()}</p>
 <table>
   {col_tags}
