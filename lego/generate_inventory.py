@@ -9,7 +9,6 @@ Usage : python3 generate_inventory.py [--set 71395-1] [--refresh]
 
 import argparse
 import csv
-import json
 import html as html_mod
 import os, sys, time, urllib.request, urllib.error
 from datetime import date
@@ -24,10 +23,9 @@ _args.add_argument("--set", default="71395-1", help="numéro de set Rebrickable 
 _args.add_argument("--refresh", action="store_true", help="réinterroger l'API au lieu du cache local")
 ARGS = _args.parse_args()
 
-SET_NUM        = ARGS.set if "-" in ARGS.set else f"{ARGS.set}-1"
+SET_NUM        = rebrickable.normalize_set_num(ARGS.set)
 SET_NUM_SHORT  = SET_NUM.removesuffix("-1")
 OUTPUT_FILE    = f"{SET_NUM_SHORT}_inventory.html"
-API_CACHE      = f"cache/api/{SET_NUM}.json"
 CACHE_DIR      = "cache/images"
 PROC_DIR       = "cache/processed"   # white-background-removed copies
 NUM_COLS       = 3   # 3 or 4 columns of pieces per row on A4
@@ -171,52 +169,9 @@ def processed_image(src_path: str, fname: str) -> str:
     return dst
 
 # ── Inventaire (API Rebrickable, mis en cache localement) ──────────────────────
-def load_set() -> dict:
-    """Infos du set + liste de ses pièces, depuis le cache ou l'API."""
-    if os.path.exists(API_CACHE) and not ARGS.refresh:
-        with open(API_CACHE) as f:
-            return json.load(f)
-    print(f"Interrogation de Rebrickable pour {SET_NUM}…")
-    data = {
-        "set": rebrickable.get(f"sets/{SET_NUM}/"),
-        "parts": rebrickable.get_all(f"sets/{SET_NUM}/parts/"),
-    }
-    os.makedirs(os.path.dirname(API_CACHE), exist_ok=True)
-    with open(API_CACHE, "w") as f:
-        json.dump(data, f)
-    return data
-
-# Repli si la couleur n'a pas d'ID BrickLink dans la réponse : via colors.csv
-_RB_TO_BL = {}
-for _bl_id, _c in COLORS.items():
-    _RB_TO_BL.setdefault(_c["rebrickable_id"], _bl_id)
-
-def bl_color(color: dict) -> str:
-    bl = (color.get("external_ids") or {}).get("BrickLink")
-    if bl and bl.get("ext_ids"):
-        return str(bl["ext_ids"][0])
-    return _RB_TO_BL.get(str(color["id"]), f"rb{color['id']}")
-
-def bl_part(part: dict) -> str:
-    bl = part["external_ids"].get("BrickLink") or []
-    return part["part_num"] if part["part_num"] in bl or not bl else bl[0]
-
-set_data = load_set()
-SET_INFO = set_data["set"]
-
-# Regroupe par (pièce, couleur) BrickLink ; les pièces de rechange sont exclues
-items: dict[tuple[str, str], dict] = {}
-for line in set_data["parts"]:
-    if line["is_spare"]:
-        continue
-    key = (bl_part(line["part"]), bl_color(line["color"]))
-    it = items.setdefault(key, {"id": key[0], "color": key[1], "qty": 0,
-                                "name": line["part"]["name"], "elements": [],
-                                "img_url": line["part"]["part_img_url"]})
-    it["qty"] += line["quantity"]
-    if line.get("element_id") and line["element_id"] not in it["elements"]:
-        it["elements"].append(line["element_id"])
-all_items = list(items.values())
+set_data  = rebrickable.load_set(SET_NUM, ARGS.refresh)
+SET_INFO  = set_data["set"]
+all_items = rebrickable.set_items(set_data)
 
 # ── Images ─────────────────────────────────────────────────────────────────────
 by_color: dict[str, list] = defaultdict(list)
