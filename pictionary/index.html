@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pictionary – tireur de mots</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" href="icone-192.png">
 <style>
   /* Pensé pour l'e-ink : noir sur blanc, gros texte, aucune animation. */
   * { box-sizing: border-box; }
@@ -172,6 +175,11 @@ function nouveauTirage() {
 
 document.getElementById('autres').addEventListener('click', nouveauTirage);
 nouveauTirage();
+
+// Hors ligne : seulement en HTTPS (rien en file://).
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>
