@@ -4,8 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pictionary – tireur de mots</title>
+<style>
+  /* Pensé pour l'e-ink : noir sur blanc, gros texte, aucune animation. */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: #000; }
+  body { font-family: system-ui, sans-serif; min-height: 100vh; display: flex;
+    flex-direction: column; justify-content: center; padding: 24px;
+    max-width: 640px; margin: 0 auto; }
+  ul { list-style: none; margin: 0 0 32px; padding: 0; }
+  li { border-bottom: 2px solid #000; padding: 20px 0; }
+  li:first-child { border-top: 2px solid #000; }
+  .categorie { display: block; font-size: 18px; font-variant: small-caps;
+    letter-spacing: 0.08em; margin-bottom: 4px; }
+  .mot { display: block; font-size: 36px; font-weight: bold; }
+  button { width: 100%; font: inherit; font-size: 28px; font-weight: bold;
+    padding: 20px; background: #000; color: #fff; border: 0; border-radius: 8px; }
+</style>
 </head>
 <body>
+<ul id="mots" aria-live="polite"></ul>
+<button id="autres" type="button">Autres mots</button>
 <script id="logique">
 // Logique pure, sans DOM : testée par tirage.test.js.
 const CLE_VUS = 'pictionary-vus';
@@ -120,6 +138,40 @@ function sauverVus(storage, vus) {
     // stockage indisponible : on joue sans mémoire
   }
 }
+</script>
+<script>
+const LIBELLES = { objet: 'Objet', animal: 'Animal', action: 'Action',
+  personnage: 'Personnage', marque: 'Marque' };
+
+// L'accès même à window.localStorage peut lever (fichier local, navigation privée).
+let stockage;
+try { stockage = window.localStorage; } catch { stockage = undefined; }
+let vus = chargerVus(stockage);
+
+function afficher(tirage) {
+  const liste = document.getElementById('mots');
+  liste.replaceChildren(...tirage.map(({ categorie, mot }) => {
+    const li = document.createElement('li');
+    const c = document.createElement('span');
+    c.className = 'categorie';
+    c.textContent = LIBELLES[categorie];
+    const m = document.createElement('span');
+    m.className = 'mot';
+    m.textContent = mot;
+    li.append(c, m);
+    return li;
+  }));
+}
+
+function nouveauTirage() {
+  const r = tirer(MOTS, vus);
+  vus = r.vus;
+  sauverVus(stockage, vus);
+  afficher(r.tirage);
+}
+
+document.getElementById('autres').addEventListener('click', nouveauTirage);
+nouveauTirage();
 </script>
 </body>
 </html>
