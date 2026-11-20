@@ -93,3 +93,17 @@ test('sauverVus écrit en JSON et ne lève pas si setItem lève', () => {
   assert.doesNotThrow(() => sauverVus({ setItem() { throw new Error('plein'); } }, {}));
   assert.doesNotThrow(() => sauverVus(undefined, {}));
 });
+
+test('liste complète', () => {
+  assert.deepEqual(Object.keys(MOTS).sort(), ['action', 'animal', 'marque', 'objet', 'personnage']);
+  for (const [c, l] of Object.entries(MOTS)) assert.ok(l.length >= 50, `${c} : ${l.length} mots`);
+  const total = Object.values(MOTS).reduce((n, l) => n + l.length, 0);
+  assert.ok(total >= 280 && total <= 340, `total : ${total}`);
+});
+
+test('pas de doublon ni de mot vide', () => {
+  const tous = Object.values(MOTS).flat().map(m => m.trim().toLowerCase());
+  for (const m of tous) assert.ok(m.length > 0, 'mot vide');
+  const doublons = tous.filter((m, i) => tous.indexOf(m) !== i);
+  assert.deepEqual(doublons, []);
+});
