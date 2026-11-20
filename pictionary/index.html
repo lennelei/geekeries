@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pictionary – tireur de mots</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#ffffff">
+<link rel="icon" href="icone-192.png">
+<style>
+  /* Pensé pour l'e-ink : noir sur blanc, gros texte, aucune animation. */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: #000; }
+  body { font-family: system-ui, sans-serif; min-height: 100vh; display: flex;
+    flex-direction: column; justify-content: center; padding: 24px;
+    max-width: 640px; margin: 0 auto; }
+  ul { list-style: none; margin: 0 0 32px; padding: 0; }
+  li { border-bottom: 2px solid #000; padding: 20px 0; }
+  li:first-child { border-top: 2px solid #000; }
+  .categorie { display: block; font-size: 18px; font-variant: small-caps;
+    letter-spacing: 0.08em; margin-bottom: 4px; }
+  .mot { display: block; font-size: 36px; font-weight: bold; }
+  button { width: 100%; font: inherit; font-size: 28px; font-weight: bold;
+    padding: 20px; background: #000; color: #fff; border: 0; border-radius: 8px; }
+</style>
+</head>
+<body>
+<ul id="mots" aria-live="polite"></ul>
+<button id="autres" type="button">Autres mots</button>
+<script id="logique">
+// Logique pure, sans DOM : testée par tirage.test.js.
+const CLE_VUS = 'pictionary-vus';
+
+const MOTS = {
+  objet: [
+    'un parapluie', 'une chaise', 'une clé', 'un vélo', 'une lampe', 'un ballon',
+    'une maison', 'une voiture', 'un avion', 'un bateau', 'un train', 'une fusée',
+    'un château', 'une tente', 'un téléphone', 'une télévision', 'un ordinateur', 'un livre',
+    'un crayon', 'des ciseaux', 'une montre', 'des lunettes', 'un chapeau', 'une couronne',
+    'une épée', 'un bonnet', 'une écharpe', 'une chaussure', 'une chaussette', 'un pantalon',
+    'une robe', 'un lit', 'une table', 'une fenêtre', 'un escalier', 'une échelle',
+    'un marteau', 'une brosse à dents', 'un gâteau', 'une glace', 'une pizza', 'une banane',
+    'une pomme', 'une carotte', 'un œuf', 'une baguette', 'une bougie', 'un cadeau',
+    'un sapin de Noël', 'un bonhomme de neige', 'un arc-en-ciel', 'le soleil', 'la lune',
+    'une étoile', 'un nuage', 'une fleur', 'un arbre', 'un volcan', 'une guitare',
+    'un cerf-volant', 'une trottinette', 'un toboggan',
+  ],
+  animal: [
+    'une girafe', 'un chat', 'un escargot', 'un poisson', 'un éléphant', 'un chien',
+    'un lapin', 'un cheval', 'une vache', 'un cochon', 'un mouton', 'une poule',
+    'un canard', 'un lion', 'un tigre', 'un singe', 'un zèbre', 'un crocodile',
+    'un serpent', 'une tortue', 'une grenouille', 'un papillon', 'une abeille', 'une araignée',
+    'une fourmi', 'une coccinelle', 'un requin', 'une baleine', 'un dauphin', 'une pieuvre',
+    'un crabe', 'une méduse', 'un hibou', 'un aigle', 'un perroquet', 'un pingouin',
+    'un flamant rose', 'un ours', 'un panda', 'un kangourou', 'un koala', 'un hérisson',
+    'un écureuil', 'une souris', 'un renard', 'un loup', 'un hippopotame', 'un rhinocéros',
+    'un chameau', 'une chauve-souris', 'un dinosaure', 'un paon', 'une autruche', 'un castor',
+    'un poussin', 'un phoque', 'une limace', 'un ver de terre', 'un moustique', 'un hamster',
+  ],
+  action: [
+    'sauter', 'dormir', 'nager', 'manger', 'courir', 'danser',
+    'chanter', 'pleurer', 'rire', 'boire', 'lire', 'écrire',
+    'dessiner', 'cuisiner', 'se brosser les dents', 'prendre un bain', 'faire du vélo', 'skier',
+    'patiner', 'grimper', 'tomber', 'voler', 'pêcher', 'jardiner',
+    'applaudir', 'éternuer', 'bâiller', 'crier', 'chuchoter', 'siffler',
+    'téléphoner', 'conduire', 'marcher', 'ramper', 'se cacher', 'chercher',
+    'lancer', 'attraper', 'jongler', 'faire un câlin', 'faire un bisou', 'faire la vaisselle',
+    'passer l\'aspirateur', 'se coiffer', 's\'habiller', 'ronfler', 'tricoter', 'surfer',
+    'plonger', 'ramer', 'tirer à l\'arc', 'souffler les bougies', 'faire une bataille de boules de neige', 'ouvrir un cadeau',
+    'se moucher', 'jouer au foot', 'arroser les fleurs', 'sonner à la porte', 'se réveiller', 'faire du toboggan',
+  ],
+  personnage: [
+    'le Père Noël', 'une sorcière', 'un pirate', 'un fantôme', 'un roi', 'une reine',
+    'une princesse', 'un chevalier', 'une fée', 'un dragon', 'une licorne', 'un vampire',
+    'un magicien', 'un ogre', 'un géant', 'une sirène', 'un extraterrestre', 'un super-héros',
+    'un clown', 'un astronaute', 'un pompier', 'un policier', 'un cow-boy', 'un docteur',
+    'un cuisinier', 'un ninja', 'Pikachu', 'Mario', 'Sonic', 'Spider-Man',
+    'Batman', 'Superman', 'Elsa', 'Olaf', 'Mickey', 'Stitch',
+    'Shrek', 'Simba', 'Nemo', 'Pinocchio', 'le Petit Chaperon rouge', 'Cendrillon',
+    'Blanche-Neige', 'Harry Potter', 'Astérix', 'Obélix', 'Tintin', 'Peppa Pig',
+    'Bob l\'éponge', 'Pac-Man', 'Dark Vador', 'Yoda', 'un Minion', 'Barbie',
+    'Hello Kitty', 'un Schtroumpf', 'Garfield', 'Ladybug', 'Kylian Mbappé', 'Napoléon',
+  ],
+  marque: [
+    'Lego', 'Nutella', 'Playmobil', 'Coca-Cola', 'McDonald\'s', 'Nike',
+    'Adidas', 'Apple', 'Disney', 'Nintendo', 'PlayStation', 'Minecraft',
+    'Kinder', 'Haribo', 'Danone', 'Michelin', 'Renault', 'Ferrari',
+    'Tesla', 'Air France', 'SNCF', 'La Poste', 'Google', 'YouTube',
+    'Netflix', 'Ikea', 'Decathlon', 'Carrefour', 'Orangina', 'Évian',
+    'La Vache qui rit', 'Babybel', 'Pringles', 'M&M\'s', 'Chupa Chups', 'Chocapic',
+    'Oreo', 'Pepsi', 'Monopoly', 'Uno', 'Rubik\'s Cube', 'Hot Wheels',
+    'Bic', 'Post-it', 'Tic Tac', 'Burger King', 'KFC', 'Puma',
+    'Converse', 'Lacoste', 'Pokémon', 'Mario Kart', 'Kiri', 'Petit Écolier',
+    'Banania', 'Yop', 'Smarties', 'Peugeot', 'Lamborghini', 'Dragibus',
+  ],
+};
+
+function hasard(n, rng) {
+  return Math.min(n - 1, Math.floor(rng() * n));
+}
+
+// Tire 3 mots de 3 catégories différentes, sans répéter un mot déjà vu
+// tant que sa catégorie n'est pas épuisée. Ne modifie pas `vus`.
+function tirer(mots, vus, rng = Math.random) {
+  const categories = Object.keys(mots);
+  for (let i = categories.length - 1; i > 0; i--) {
+    const j = hasard(i + 1, rng);
+    [categories[i], categories[j]] = [categories[j], categories[i]];
+  }
+  const nouveauxVus = {};
+  for (const [c, liste] of Object.entries(vus)) nouveauxVus[c] = [...liste];
+  const tirage = categories.slice(0, 3).map(categorie => {
+    const dejaVus = new Set(nouveauxVus[categorie] || []);
+    let candidats = mots[categorie].filter(m => !dejaVus.has(m));
+    if (candidats.length === 0) {
+      nouveauxVus[categorie] = [];
+      candidats = mots[categorie];
+    }
+    const mot = candidats[hasard(candidats.length, rng)];
+    nouveauxVus[categorie] = [...(nouveauxVus[categorie] || []), mot];
+    return { categorie, mot };
+  });
+  return { tirage, vus: nouveauxVus };
+}
+
+function chargerVus(storage) {
+  try {
+    const brut = JSON.parse(storage.getItem(CLE_VUS));
+    if (!brut || typeof brut !== 'object' || Array.isArray(brut)) return {};
+    for (const v of Object.values(brut)) if (!Array.isArray(v)) return {};
+    return brut;
+  } catch {
+    return {};
+  }
+}
+
+function sauverVus(storage, vus) {
+  try {
+    storage.setItem(CLE_VUS, JSON.stringify(vus));
+  } catch {
+    // stockage indisponible : on joue sans mémoire
+  }
+}
+</script>
+<script>
+const LIBELLES = { objet: 'Objet', animal: 'Animal', action: 'Action',
+  personnage: 'Personnage', marque: 'Marque' };
+
+// L'accès même à window.localStorage peut lever (fichier local, navigation privée).
+let stockage;
+try { stockage = window.localStorage; } catch { stockage = undefined; }
+let vus = chargerVus(stockage);
+
+function afficher(tirage) {
+  const liste = document.getElementById('mots');
+  liste.replaceChildren(...tirage.map(({ categorie, mot }) => {
+    const li = document.createElement('li');
+    const c = document.createElement('span');
+    c.className = 'categorie';
+    c.textContent = LIBELLES[categorie];
+    const m = document.createElement('span');
+    m.className = 'mot';
+    m.textContent = mot;
+    li.append(c, m);
+    return li;
+  }));
+}
+
+function nouveauTirage() {
+  const r = tirer(MOTS, vus);
+  vus = r.vus;
+  sauverVus(stockage, vus);
+  afficher(r.tirage);
+}
+
+document.getElementById('autres').addEventListener('click', nouveauTirage);
+nouveauTirage();
+
+// Hors ligne : seulement en HTTPS (rien en file://).
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
