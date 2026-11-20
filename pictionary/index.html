@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pictionary – tireur de mots</title>
+</head>
+<body>
+<script id="logique">
+// Logique pure, sans DOM : testée par tirage.test.js.
+const CLE_VUS = 'pictionary-vus';
+
+const MOTS = {
+  objet: ['un parapluie', 'une chaise', 'une clé', 'un vélo', 'une lampe'],
+  animal: ['une girafe', 'un chat', 'un escargot', 'un poisson', 'un éléphant'],
+  action: ['sauter', 'dormir', 'nager', 'manger', 'courir'],
+  personnage: ['le Père Noël', 'une sorcière', 'un pirate', 'un fantôme', 'un roi'],
+  marque: ['Lego', 'Nutella', 'Playmobil', 'Coca-Cola', 'McDonald\'s'],
+};
+
+function hasard(n, rng) {
+  return Math.min(n - 1, Math.floor(rng() * n));
+}
+
+// Tire 3 mots de 3 catégories différentes, sans répéter un mot déjà vu
+// tant que sa catégorie n'est pas épuisée. Ne modifie pas `vus`.
+function tirer(mots, vus, rng = Math.random) {
+  const categories = Object.keys(mots);
+  for (let i = categories.length - 1; i > 0; i--) {
+    const j = hasard(i + 1, rng);
+    [categories[i], categories[j]] = [categories[j], categories[i]];
+  }
+  const nouveauxVus = {};
+  for (const [c, liste] of Object.entries(vus)) nouveauxVus[c] = [...liste];
+  const tirage = categories.slice(0, 3).map(categorie => {
+    const dejaVus = new Set(nouveauxVus[categorie] || []);
+    let candidats = mots[categorie].filter(m => !dejaVus.has(m));
+    if (candidats.length === 0) {
+      nouveauxVus[categorie] = [];
+      candidats = mots[categorie];
+    }
+    const mot = candidats[hasard(candidats.length, rng)];
+    nouveauxVus[categorie] = [...(nouveauxVus[categorie] || []), mot];
+    return { categorie, mot };
+  });
+  return { tirage, vus: nouveauxVus };
+}
+
+function chargerVus(storage) {
+  try {
+    const brut = JSON.parse(storage.getItem(CLE_VUS));
+    if (!brut || typeof brut !== 'object' || Array.isArray(brut)) return {};
+    for (const v of Object.values(brut)) if (!Array.isArray(v)) return {};
+    return brut;
+  } catch {
+    return {};
+  }
+}
+
+function sauverVus(storage, vus) {
+  try {
+    storage.setItem(CLE_VUS, JSON.stringify(vus));
+  } catch {
+    // stockage indisponible : on joue sans mémoire
+  }
+}
+</script>
+</body>
+</html>
