@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Test de tracé – Boox</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; color: #000;
+    font-family: sans-serif; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; gap: 12px; align-items: center; padding: 8px 12px;
+    border-bottom: 2px solid #000; font-size: 20px; flex-wrap: wrap; }
+  button { font-size: 20px; padding: 8px 16px; background: #fff; color: #000;
+    border: 2px solid #000; border-radius: 6px; }
+  button.actif { background: #000; color: #fff; }
+  #infos { margin-left: auto; font-size: 16px; }
+  canvas { flex: 1; touch-action: none; display: block; width: 100%; }
+</style>
+</head>
+<body>
+<header>
+  <button id="effacer">Effacer</button>
+  <button id="epaisseur">Trait : moyen</button>
+  <button id="styletSeul" class="actif">Stylet seul</button>
+  <span id="infos">Dessine avec le stylet</span>
+</header>
+<canvas id="zone"></canvas>
+<script>
+  const canvas = document.getElementById('zone');
+  // desynchronized : indice au navigateur pour réduire la latence d'affichage
+  const ctx = canvas.getContext('2d', { desynchronized: true });
+  const infos = document.getElementById('infos');
+  const epaisseurs = [['fin', 2], ['moyen', 4], ['épais', 8]];
+  let iEpaisseur = 1;
+  let styletSeul = true;
+  let enCours = null;          // pointerId du trait en cours
+  let dernier = null;          // dernier point dessiné
+  let nbEvenements = 0, debut = 0, pressionMax = 0;
+
+  function dimensionner() {
+    const r = canvas.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(r.width * dpr);
+    canvas.height = Math.round(r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000';
+  }
+  window.addEventListener('resize', dimensionner);
+  dimensionner();
+
+  function point(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top, p: e.pressure || 0.5 };
+  }
+
+  function tracer(a, b) {
+    const base = epaisseurs[iEpaisseur][1];
+    ctx.lineWidth = base * (0.5 + b.p);   // la pression module l'épaisseur
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    if (styletSeul && e.pointerType !== 'pen') {
+      infos.textContent = `Ignoré : ${e.pointerType} (stylet seul activé)`;
+      return;
+    }
+    enCours = e.pointerId;
+    canvas.setPointerCapture(e.pointerId);
+    dernier = point(e);
+    tracer(dernier, dernier);
+    nbEvenements = 0; debut = performance.now(); pressionMax = e.pressure;
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    if (e.pointerId !== enCours) return;
+    // les événements regroupés donnent un trait plus fidèle quand l'écran rame
+    const evts = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of (evts.length ? evts : [e])) {
+      const p = point(ev);
+      tracer(dernier, p);
+      dernier = p;
+      nbEvenements++;
+      pressionMax = Math.max(pressionMax, ev.pressure);
+    }
+  });
+
+  function fin(e) {
+    if (e.pointerId !== enCours) return;
+    const duree = (performance.now() - debut) / 1000;
+    const freq = duree > 0 ? Math.round(nbEvenements / duree) : 0;
+    infos.textContent = `${e.pointerType} · ${freq} points/s · pression max ${pressionMax.toFixed(2)}`;
+    enCours = null; dernier = null;
+  }
+  canvas.addEventListener('pointerup', fin);
+  canvas.addEventListener('pointercancel', fin);
+
+  document.getElementById('effacer').onclick = () =>
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  document.getElementById('epaisseur').onclick = ev => {
+    iEpaisseur = (iEpaisseur + 1) % epaisseurs.length;
+    ev.target.textContent = `Trait : ${epaisseurs[iEpaisseur][0]}`;
+  };
+  document.getElementById('styletSeul').onclick = ev => {
+    styletSeul = !styletSeul;
+    ev.target.classList.toggle('actif', styletSeul);
+  };
+</script>
+</body>
+</html>
