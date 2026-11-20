@@ -18,9 +18,13 @@ Notes reste donc l'outil de dessin ; le besoin se réduit à proposer des mots.
 
 ## Décision
 
-Une page web statique, un seul fichier HTML autonome (liste de mots incluse), utilisable
-hors ligne, ouverte sur le téléphone de celui qui dessine (ou sur la Boox, puisqu'on n'y
-dessine plus).
+Une page web statique installable (PWA), ouverte sur le téléphone de celui qui dessine
+(ou sur la Boox, puisqu'on n'y dessine plus) :
+
+- `index.html` autonome (liste de mots incluse, aucune ressource externe) ;
+- un manifeste et des icônes pour l'installer sur l'écran d'accueil ;
+- un service worker qui met ces fichiers en cache : le jeu marche sans réseau une fois
+  ouvert une première fois (il faut HTTPS, fourni par GitHub Pages).
 
 - Chaque tirage affiche **3 mots de 3 catégories différentes** parmi : objet, animal,
   action, personnage (fiction surtout, quelques célébrités connues des enfants), marque.
